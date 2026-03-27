@@ -351,3 +351,35 @@ class JellyfinClient:
             )
 
         logger.info(f"Cleared collection {collection_id}")
+
+    def delete_all_collections(self, auto_only: bool = False):
+        """
+        Delete collections from Jellyfin.
+        auto_only=False: deletes every BoxSet (all collections).
+        auto_only=True:  deletes only collections tagged 'Jellyfin-Auto-Collections'.
+        """
+        collections = self.get_all_collections()
+
+        if auto_only:
+            collections = [
+                c
+                for c in collections
+                if "Jellyfin-Auto-Collections" in c.get("Tags", [])
+            ]
+            logger.info(f"Deleting {len(collections)} auto-managed collections...")
+        else:
+            logger.info(f"Deleting ALL {len(collections)} collections...")
+
+        for collection in collections:
+            collection_id = collection["Id"]
+            name = collection.get("Name", collection_id)
+            r = requests.delete(
+                f"{self.server_url}/Items/{collection_id}",
+                headers={"X-Emby-Token": self.api_key},
+            )
+            if r.status_code in (200, 204):
+                logger.info(f"Deleted collection: {name}")
+            else:
+                logger.warning(
+                    f"Failed to delete collection: {name} (status {r.status_code})"
+                )

@@ -1,21 +1,19 @@
-import argparse
-import os
-import sys
-from typing import cast
-
-import pluginlib
-from apscheduler.schedulers.blocking import BlockingScheduler
-from apscheduler.triggers.cron import CronTrigger
-from loguru import logger
-from pyaml_env import parse_config
-
 from utils.jellyfin import JellyfinClient
 from utils.jellyseerr import JellyseerrClient
+import pluginlib
+from loguru import logger
+from pyaml_env import parse_config
+import os
+import sys
 
-parser = argparse.ArgumentParser(description="Jellyfin List Scraper")
-parser.add_argument(
-    "--config", type=str, help="Path to config file", default="config.yaml"
-)
+from apscheduler.schedulers.blocking import BlockingScheduler
+from apscheduler.triggers.cron import CronTrigger
+
+import argparse
+parser = argparse.ArgumentParser(description='Jellyfin List Scraper')
+parser.add_argument('--config', type=str, help='Path to config file', default='config.yaml')
+parser.add_argument('--delete-all-collections', action='store_true', help='Delete ALL collections in Jellyfin and exit')
+parser.add_argument('--delete-all-auto-collections', action='store_true', help='Delete only collections created by Jellyfin-Auto-Collections and exit')
 args = parser.parse_args()
 
 # Set logging level
@@ -27,71 +25,56 @@ logger.add(sys.stderr, level=log_level)
 # Load config
 if not os.path.exists(args.config):
     logger.error(f"{args.config} does not exist.")
-    logger.error(
-        f"Copy config.yaml.example to {args.config} and add your jellyfin config."
-    )
+    logger.error(f"Copy config.yaml.example to {args.config} and add your jellyfin config.")
     raise Exception("No config file found.")
 config = parse_config(args.config, default_value=None)
-
 
 def main(config):
     # Setup jellyfin connection
     jf_client = JellyfinClient(
-        server_url=config["jellyfin"]["server_url"],
-        api_key=config["jellyfin"]["api_key"],
-        user_id=config["jellyfin"]["user_id"],
+        server_url=config['jellyfin']['server_url'],
+        api_key=config['jellyfin']['api_key'],
+        user_id=config['jellyfin']['user_id']
     )
 
     if "jellyseerr" in config:
         js_client = JellyseerrClient(
-            server_url=config["jellyseerr"]["server_url"],
-            api_key=config["jellyseerr"].get("api_key", None),
-            email=config["jellyseerr"].get("email", None),
-            password=str(config["jellyseerr"].get("password", None)),
-            user_type=str(config["jellyseerr"].get("user_type", "local")),
+            server_url=config['jellyseerr']['server_url'],
+            api_key=config['jellyseerr'].get('api_key', None),
+            email=config['jellyseerr'].get('email', None),
+            password=str(config['jellyseerr'].get('password', None)),
+            user_type=str(config['jellyseerr'].get('user_type', "local"))
         )
     else:
         js_client = None
 
     # Load plugins
-    loader = pluginlib.PluginLoader(modules=["plugins"])
-    plugins = loader.plugins["list_scraper"]
+    loader = pluginlib.PluginLoader(modules=['plugins'])
+    plugins = loader.plugins['list_scraper']
 
     # If Jellyfin_api plugin is enabled - pass the jellyfin creds to it
-    if "jellyfin_api" in config["plugins"] and config["plugins"]["jellyfin_api"].get(
-        "enabled", False
-    ):
-        config["plugins"]["jellyfin_api"]["server_url"] = config["jellyfin"][
-            "server_url"
-        ]
+    if "jellyfin_api" in config["plugins"] and config["plugins"]["jellyfin_api"].get("enabled", False):
+        config["plugins"]["jellyfin_api"]["server_url"] = config["jellyfin"]["server_url"]
         config["plugins"]["jellyfin_api"]["user_id"] = config["jellyfin"]["user_id"]
         config["plugins"]["jellyfin_api"]["api_key"] = config["jellyfin"]["api_key"]
 
     # If directors plugin is enabled - always pass jellyfin creds to it
-    if "directors" in config["plugins"] and config["plugins"]["directors"].get(
-        "enabled", False
-    ):
+    if "directors" in config["plugins"] and config["plugins"]["directors"].get("enabled", False):
         config["plugins"]["directors"]["server_url"] = config["jellyfin"]["server_url"]
         config["plugins"]["directors"]["user_id"] = config["jellyfin"]["user_id"]
         config["plugins"]["directors"]["api_key"] = config["jellyfin"]["api_key"]
 
     # Update jellyfin with lists
-    for plugin_name in config["plugins"]:
-        if config["plugins"][plugin_name]["enabled"] and plugin_name in plugins:
+    for plugin_name in config['plugins']:
+        if config['plugins'][plugin_name]["enabled"] and plugin_name in plugins:
             plugin = plugins[plugin_name]
 
             # Allow plugins to self-generate their list_ids if list_ids is empty
-            if hasattr(plugin, "get_list_ids") and not config["plugins"][
-                plugin_name
-            ].get("list_ids"):
-                logger.info(
-                    f"Plugin '{plugin_name}' has no list_ids — calling get_list_ids() to auto-discover"
-                )
-                config["plugins"][plugin_name]["list_ids"] = plugin.get_list_ids(
-                    config["plugins"][plugin_name]
-                )
+            if hasattr(plugin, 'get_list_ids') and not config['plugins'][plugin_name].get("list_ids"):
+                logger.info(f"Plugin '{plugin_name}' has no list_ids — calling get_list_ids() to auto-discover")
+                config['plugins'][plugin_name]["list_ids"] = plugin.get_list_ids(config['plugins'][plugin_name])
 
-            for list_entry in config["plugins"][plugin_name]["list_ids"]:
+            for list_entry in config['plugins'][plugin_name]["list_ids"]:
                 if isinstance(list_entry, dict):
                     if "list_id" in list_entry:
                         list_id = list_entry["list_id"]
@@ -104,21 +87,17 @@ def main(config):
 
                 logger.info(f"")
                 logger.info(f"")
-                logger.info(
-                    f"Getting list info for plugin: {plugin_name}, list id: {list_id}"
-                )
+                logger.info(f"Getting list info for plugin: {plugin_name}, list id: {list_id}")
 
                 # Match list items to jellyfin items
-                list_info = plugins[plugin_name].get_list(
-                    list_id, config["plugins"][plugin_name]
-                )
+                list_info = plugins[plugin_name].get_list(list_id, config['plugins'][plugin_name])
 
                 # Find jellyfin collection or create it
                 collection_id = jf_client.find_collection_with_name_or_create(
-                    list_name or list_info["name"],
+                    list_name or list_info['name'],
                     list_id,
                     list_info.get("description", None),
-                    plugin_name,
+                    plugin_name
                 )
 
                 if config["plugins"][plugin_name].get("clear_collection", False):
@@ -126,16 +105,12 @@ def main(config):
                     jf_client.clear_collection(collection_id)
 
                 # Add items to the collection
-                for item in list_info["items"]:
+                for item in list_info['items']:
                     matched = jf_client.add_item_to_collection(
                         collection_id,
                         item,
-                        year_filter=config["plugins"][plugin_name].get(
-                            "year_filter", True
-                        ),
-                        jellyfin_query_parameters=config["jellyfin"].get(
-                            "query_parameters", {}
-                        ),
+                        year_filter=config["plugins"][plugin_name].get("year_filter", True),
+                        jellyfin_query_parameters=config["jellyfin"].get("query_parameters", {})
                     )
                     if not matched and js_client is not None:
                         js_client.make_request(item)
@@ -148,17 +123,28 @@ def main(config):
 
 if __name__ == "__main__":
     logger.info("Starting up")
+
+    if args.delete_all_collections or args.delete_all_auto_collections:
+        jf_client = JellyfinClient(
+            server_url=config['jellyfin']['server_url'],
+            api_key=config['jellyfin']['api_key'],
+            user_id=config['jellyfin']['user_id']
+        )
+        if args.delete_all_collections:
+            logger.info("--delete-all-collections: deleting ALL collections...")
+            jf_client.delete_all_collections(auto_only=False)
+        elif args.delete_all_auto_collections:
+            logger.info("--delete-all-auto-collections: deleting auto-managed collections only...")
+            jf_client.delete_all_collections(auto_only=True)
+        logger.info("Done.")
+        sys.exit(0)
+
     logger.info("Starting initial run")
     main(config)
 
     # Setup scheduler
     if "crontab" in config and config["crontab"] != "":
         scheduler = BlockingScheduler()
-        scheduler.add_job(
-            main,
-            CronTrigger.from_crontab(config["crontab"]),
-            args=[config],
-            timezone=config.get("timezone", "UTC"),
-        )
+        scheduler.add_job(main, CronTrigger.from_crontab(config['crontab']), args=[config], timezone=config.get("timezone", "UTC"))
         logger.info("Starting scheduler using crontab: " + config["crontab"])
         scheduler.start()
