@@ -158,7 +158,7 @@ class JellyfinClient:
             )
             collection_id = res2.json()["Id"]
 
-        # Update collection description and add tags to we can find it later
+        # Update collection description and add tags so we can find it later
         if collection_id is not None:
             collection = requests.get(
                 f"{self.server_url}/Users/{self.user_id}/Items/{collection_id}",
@@ -194,25 +194,34 @@ class JellyfinClient:
         collection_name,
         mosaic_limit=20,
         google_font_url="https://fonts.googleapis.com/css2?family=Dosis:wght@800&display=swap",
+        override_images=None,
     ):
+        """
+        Generate and upload a mosaic poster for a collection.
 
-        # Check if collection poster exists
-        poster_urls = fetch_collection_posters(
-            self.server_url, self.api_key, self.user_id, collection_id
-        )[:mosaic_limit]
+        override_images: optional list of PIL Image objects to use instead of
+                         fetching posters from the collection. Used e.g. to pass
+                         a director's photo as the sole background image.
+        """
         headers = {"X-Emby-Token": self.api_key}
 
-        # Use a ThreadPoolExecutor to download images in parallel
-        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-            futures = [
-                executor.submit(safe_download, url, headers) for url in poster_urls
-            ]
-            results = [
-                future.result() for future in concurrent.futures.as_completed(futures)
-            ]
+        if override_images is not None:
+            poster_images = override_images
+        else:
+            # Fetch poster images from the collection items
+            poster_urls = fetch_collection_posters(
+                self.server_url, self.api_key, self.user_id, collection_id
+            )[:mosaic_limit]
 
-        # Filter out any failed downloads (None values)
-        poster_images = [img for img in results if img is not None]
+            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+                futures = [
+                    executor.submit(safe_download, url, headers) for url in poster_urls
+                ]
+                results = [
+                    future.result() for future in concurrent.futures.as_completed(futures)
+                ]
+
+            poster_images = [img for img in results if img is not None]
 
         font_path = get_font(google_font_url)
 
@@ -226,12 +235,10 @@ class JellyfinClient:
             )
             return
 
-        # Upload
-
         from PIL import Image
 
-        img = Image.open(output_path)  # or whatever format
-        img = img.convert("RGB")  # Ensures it's safe for JPEG
+        img = Image.open(output_path)
+        img = img.convert("RGB")
         img.save(output_path, format="JPEG")
 
         with open(output_path, "rb") as f:
@@ -329,17 +336,6 @@ class JellyfinClient:
             params={"Recursive": "true", "parentId": collection_id},
         )
         all_ids = [item["Id"] for item in res.json()["Items"]]
-
-        # chunk ids into groups of 10
-        all_ids = [all_ids[i : i + 10] for i in range(0, len(all_ids), 10)]
-        for ids in all_ids:
-            requests.delete(
-                f"{self.server_url}/Collections/{collection_id}/Items",
-                headers={"X-Emby-Token": self.api_key},
-                params={"ids": ",".join(ids)},
-            )
-
-        logger.info(f"Cleared collection {collection_id}")
 
         # chunk ids into groups of 10
         all_ids = [all_ids[i : i + 10] for i in range(0, len(all_ids), 10)]

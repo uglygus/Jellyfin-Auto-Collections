@@ -1,5 +1,6 @@
 import requests
 from loguru import logger
+
 from utils.base_plugin import ListScraper
 from utils.jellyfin import JellyfinClient
 
@@ -12,6 +13,7 @@ class Directors(ListScraper):
         """
         list_id: a Jellyfin person ID for a director.
         Returns a single collection of all movies directed by that person.
+        Includes poster_url if the director has an image in Jellyfin.
         """
         if config is None:
             config = {}
@@ -21,10 +23,24 @@ class Directors(ListScraper):
         user_id = config["user_id"]
         headers = {"X-Emby-Token": api_key}
 
-        # Fetch director name
-        person_res = requests.get(f"{server_url}/Users/{user_id}/Items/{list_id}", headers=headers)
+        # Fetch director name and image tag
+        person_res = requests.get(
+            f"{server_url}/Users/{user_id}/Items/{list_id}", headers=headers
+        )
         person_res.raise_for_status()
-        director_name = person_res.json().get("Name", list_id)
+        person = person_res.json()
+        director_name = person.get("Name", list_id)
+
+        # Build poster_url if the director has an image
+        poster_url = None
+        image_tag = person.get("ImageTags", {}).get("Primary")
+        if image_tag:
+            poster_url = (
+                f"{server_url}/Items/{list_id}/Images/Primary"
+                f"?tag={image_tag}&X-Emby-Token={api_key}"
+            )
+
+        logger.info(f"image_tag url is  '{poster_url}'")
 
         # Fetch all movies for this director
         params = {
@@ -45,12 +61,14 @@ class Directors(ListScraper):
 
         movies = []
         for movie in res.json().get("Items", []):
-            movies.append({
-                "title": movie["Name"],
-                "release_year": movie.get("ProductionYear"),
-                "media_type": "movie",
-                "imdb_id": movie.get("ProviderIds", {}).get("Imdb"),
-            })
+            movies.append(
+                {
+                    "title": movie["Name"],
+                    "release_year": movie.get("ProductionYear"),
+                    "media_type": "movie",
+                    "imdb_id": movie.get("ProviderIds", {}).get("Imdb"),
+                }
+            )
 
         logger.info(f"Director '{director_name}': found {len(movies)} movies")
 
@@ -58,6 +76,7 @@ class Directors(ListScraper):
             "name": director_name,
             "description": f"Films directed by {director_name}",
             "items": movies,
+            "poster_url": poster_url,  # None if no image exists
         }
 
     @staticmethod

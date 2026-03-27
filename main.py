@@ -5,6 +5,7 @@ from loguru import logger
 from pyaml_env import parse_config
 import os
 import sys
+from io import BytesIO
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -115,10 +116,38 @@ def main(config):
                     if not matched and js_client is not None:
                         js_client.make_request(item)
 
-                # Add a poster image if collection doesn't have one
-                if not jf_client.has_poster(collection_id):
-                    logger.info("Collection has no poster - generating one")
-                    jf_client.make_poster(collection_id, list_info["name"])
+                # Generate and upload collection poster
+                poster_mode = config["plugins"][plugin_name].get("poster_mode", "mosaic")
+                poster_url = list_info.get("poster_url")
+
+                if poster_mode == "director" and poster_url:
+                    # Download the director image and use it as the sole mosaic background
+                    logger.info(f"Generating director-style poster for '{list_info['name']}'")
+                    try:
+                        from PIL import Image
+                        import requests as req
+                        r = req.get(poster_url, headers={"X-Emby-Token": config["jellyfin"]["api_key"]})
+                        r.raise_for_status()
+                        director_image = Image.open(BytesIO(r.content)).convert("RGB")
+                        jf_client.make_poster(
+                            collection_id,
+                            list_info["name"],
+                            override_images=[director_image]
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to use director image for '{list_info['name']}': {e} — falling back to mosaic")
+                        if not jf_client.has_poster(collection_id):
+                            jf_client.make_poster(collection_id, list_info["name"])
+
+                elif poster_mode == "director" and not poster_url:
+                    logger.warning(f"poster_mode is 'director' but no image found for '{list_info['name']}' — falling back to mosaic")
+                    if not jf_client.has_poster(collection_id):
+                        jf_client.make_poster(collection_id, list_info["name"])
+
+                else:
+                    if not jf_client.has_poster(collection_id):
+                        logger.info("Collection has no poster - generating mosaic")
+                        jf_client.make_poster(collection_id, list_info["name"])
 
 
 if __name__ == "__main__":

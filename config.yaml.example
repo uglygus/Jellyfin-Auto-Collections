@@ -92,3 +92,7 @@ plugins:
     list_ids:
       - 10-great-films-featuring-dual-performances
       - 5-things-watch-this-weekend-24-26-january-2025
+  directors:
+    enabled: true
+    poster_mode: director   # or 'mosaic' (default)
+  
